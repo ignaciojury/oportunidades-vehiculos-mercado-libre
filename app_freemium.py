@@ -313,7 +313,7 @@ PAGES_PER_YEAR = PREMIUM_PAGES_PER_YEAR if premium else FREE_PAGES_PER_YEAR
 ITEMS_PER_PAGE = PREMIUM_ITEMS_PER_PAGE if premium else FREE_ITEMS_PER_PAGE
 per_year_max_items = PAGES_PER_YEAR * ITEMS_PER_PAGE
 
-    delay = st.number_input("Delay entre páginas (s)", min_value=0.1, value=0.8, step=0.1)
+delay = st.number_input("Delay entre páginas (s)", min_value=0.1, value=0.8, step=0.1)
     proxy = st.text_input("Proxy (http(s)://user:pass@host:puerto)", value=os.getenv("HTTP_PROXY", ""))
 
 run = st.button("🔎 Buscar")
