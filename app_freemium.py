@@ -389,6 +389,9 @@ def _write_df_with_links(writer: pd.ExcelWriter, df: pd.DataFrame, sheet_name: s
 # ─────────────────────────────────────────
 # Acción
 # ─────────────────────────────────────────
+# ─────────────────────────────────────────
+# Acción
+# ─────────────────────────────────────────
 if run:
     # Freemium por cookie (1 búsqueda cada 30 días, configurable en secrets)
     if not premium:
@@ -401,7 +404,7 @@ if run:
             st.stop()
         inc_search_count()
 
-    # Límites internos según plan (sin mostrar controles)
+    # Límites internos según plan (sin controles visibles)
     if premium:
         PAGES_PER_YEAR = PREMIUM_PAGES_PER_YEAR
         ITEMS_PER_PAGE = PREMIUM_ITEMS_PER_PAGE
@@ -431,6 +434,7 @@ if run:
         seed_url, seed_meta = canonicalize_ml_url(base_url_y, proxy.strip() or None)
         st.markdown(f"• Año {y}: <{seed_url}>")
 
+        # Si Mercado Libre pide verificación/captcha, permitir resolver manualmente
         if seed_meta.get("verification", False):
             st.warning(
                 "⚠️ Mercado Libre solicitó verificación/captcha.\n"
