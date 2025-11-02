@@ -308,16 +308,10 @@ with st.sidebar:
     min_group_size = st.slider("Mínimo publicaciones por grupo", 2, 30, 3, step=1)
     pct_threshold = st.slider("% por debajo del promedio del grupo", 5, 60, 15, step=1)
 
-    st.subheader("Ampliar muestra (cada año)")
-    if premium:
-        PAGES_PER_YEAR = PREMIUM_PAGES_PER_YEAR
-        ITEMS_PER_PAGE = PREMIUM_ITEMS_PER_PAGE
-    else:
-        PAGES_PER_YEAR = FREE_PAGES_PER_YEAR
-        ITEMS_PER_PAGE = FREE_ITEMS_PER_PAGE
-
-    per_year_max_items = PAGES_PER_YEAR * ITEMS_PER_PAGE
-    st.caption(f"{PAGES_PER_YEAR} páginas/año × {ITEMS_PER_PAGE} avisos/página ≈ {per_year_max_items} avisos/año.")
+# Límites por plan (sin UI)
+PAGES_PER_YEAR = PREMIUM_PAGES_PER_YEAR if premium else FREE_PAGES_PER_YEAR
+ITEMS_PER_PAGE = PREMIUM_ITEMS_PER_PAGE if premium else FREE_ITEMS_PER_PAGE
+per_year_max_items = PAGES_PER_YEAR * ITEMS_PER_PAGE
 
     delay = st.number_input("Delay entre páginas (s)", min_value=0.1, value=0.8, step=0.1)
     proxy = st.text_input("Proxy (http(s)://user:pass@host:puerto)", value=os.getenv("HTTP_PROXY", ""))
