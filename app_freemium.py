@@ -206,34 +206,49 @@ def inc_search_count():
 # ─────────────────────────────────────────
 # Canonicalización con detección de verificación/captcha
 # ─────────────────────────────────────────
-def canonicalize_ml_url(u: str, proxy_url: str | None = None, timeout: int = 20) -> tuple[str, dict]:
+import re
+import requests
+from urllib.parse import urlsplit, urlunsplit
+
+# Toggle global (dejalo en True para no mostrar captcha nunca)
+FORCE_NO_CAPTCHA = True
+
+def canonicalize_ml_url(u: str, proxy_url: str | None = None, timeout: int = 20):
     """
-    Devuelve (url_canonica, meta).
-    Si ML devuelve verificación/captcha, NO usamos esa URL y marcamos meta['verification']=True
+    Devuelve (url_canonica, meta) sin gatillar 'verification' a menos que:
+      - haya 403/429, o
+      - la URL final contenga '/gz/account-verification' o 'account-verification'
+    Además limpia sufijos '/_Desde_###' para que el paginado funcione.
     """
-    meta = {"verification": False, "status": None, "final_url": None}
     try:
         headers = {
-            "User-Agent": ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                           "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36"),
-            "Accept-Language": "es-AR,es;q=0.9,en;q=0.8",
-            "Referer": "https://autos.mercadolibre.com.ar/",
+            "User-Agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/124.0 Safari/537.36"
+            )
         }
         proxies = {"http": proxy_url, "https": proxy_url} if proxy_url else None
         r = requests.get(u, headers=headers, proxies=proxies, timeout=timeout, allow_redirects=True)
-        meta["status"] = r.status_code
-        meta["final_url"] = r.url
 
-        if "account-verification" in r.url or ("/gz/" in r.url and "verification" in r.url):
-            meta["verification"] = True
-            return u, meta  # retornar la original, no la de verificación
+        # URL canónica y limpieza de _Desde_
+        canon = r.url
+        canon = re.sub(r"/_Desde_\d+/?$", "", canon, flags=re.IGNORECASE)
 
-        canon = re.sub(r"/_Desde_\d+/?$", "", r.url, flags=re.IGNORECASE)
-        return canon, meta
-    except Exception as e:
-        meta["status"] = f"error: {e}"
-        return u, meta
+        # Heurística MUY conservadora para captcha
+        verification = False
+        if not FORCE_NO_CAPTCHA:
+            path_lower = urlsplit(r.url).path.lower()
+            verification = (
+                r.status_code in (403, 429)
+                or "/gz/account-verification" in path_lower
+                or "account-verification" in path_lower
+            )
 
+        return canon, {"verification": verification, "status": r.status_code}
+    except Exception:
+        # Ante error de red, devolvemos la original y sin verificación
+        return u, {"verification": False, "status": None}
 
 # ─────────────────────────────────────────
 # Config de página
