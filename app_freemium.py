@@ -397,24 +397,24 @@ if run:
                 "Ingresá un código premium para continuar."
             )
             st.stop()
-        # cuenta esta búsqueda (persistente en cookie cifrada)
+        # Cuenta esta búsqueda (persistente en cookie cifrada)
         inc_search_count()
 
-   
+    # Años a consultar
     years_to_query = list(range(year_min, year_max + 1))
     st.info(f"Estrategia: búsqueda por año individual → {years_to_query}")
 
     rows_all: list[dict] = []
     logs_all: list[dict] = []
-    total_by_year = []
-    seen_links_all = set()  # DEDUPE GLOBAL POR AVISO
+    total_by_year: list[dict] = []
+    seen_links_all: set[str] = set()  # DEDUPE GLOBAL POR AVISO
 
     # 1) Scraping por cada año del rango
     for y in years_to_query:
         base_url_y = build_base_url(
             dueno_directo=only_private,
             year_min=y,
-            year_max=y,
+            year_max=y,  # consulta "por año"
             price_min_ars=price_min,
             price_max_ars=price_max,
             km_min=km_min,
@@ -422,27 +422,39 @@ if run:
             transmissions=transmissions,
         )
 
- seed_url, seed_meta = canonicalize_ml_url(base_url_y, proxy.strip() or None)
-st.markdown(f"• Año {y}: <{seed_url}>")
-if seed_meta.get("verification"):
-    st.warning("⚠️ Mercado Libre solicitó verificación/captcha para esta búsqueda. Probá con proxy residencial o bajá el ritmo.")
+        # Canonicalizamos y detectamos verificación/captcha
+        seed_url, seed_meta = canonicalize_ml_url(base_url_y, proxy.strip() or None)
+        st.markdown(f"• Año {y}: <{seed_url}>")
+        if seed_meta.get("verification"):
+            st.warning("⚠️ Mercado Libre solicitó verificación/captcha para esta búsqueda. "
+                       "Probá con un proxy residencial o bajá el ritmo (delay).")
 
+        # Scrape con defensas
         with st.spinner(f"Scrapeando año {y}…"):
-            rows_y, logs_y = scrape_list(
-                base_url=seed_url,
-                max_items=per_year_max_items,
-                max_pages=PAGES_PER_YEAR,
-                proxy_url=proxy.strip() or None,
-                delay_s=delay,
-            )
+            try:
+                rows_y, logs_y = scrape_list(
+                    base_url=seed_url,
+                    max_items=per_year_max_items,
+                    max_pages=PAGES_PER_YEAR,
+                    proxy_url=proxy.strip() or None,
+                    delay_s=delay,
+                )
+            except Exception as e:
+                st.error(f"Error al scrapear {y}: {e}")
+                rows_y, logs_y = [], []
 
-        for lg in logs_y:
+        # Logs (incluye meta del seed)
+        for lg in (logs_y or []):
             d = _log_to_dict(lg)
             d["year_query"] = y
             d["base_url_seed"] = seed_url
             d["base_url_orig"] = base_url_y
+            d["seed_status"] = seed_meta.get("status")
+            d["seed_final_url"] = seed_meta.get("final_url")
+            d["seed_verification"] = seed_meta.get("verification")
             logs_all.append(d)
 
+        # De-dupe global por permalink + imputar año faltante
         added = 0
         for r in (rows_y or []):
             r = dict(r)
