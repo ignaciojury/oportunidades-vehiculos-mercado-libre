@@ -238,7 +238,7 @@ with st.sidebar:
     st.caption("Ingresá tu código Premium para desbloquear límites.")
     premium_code = st.text_input("Código Premium", type="password")
     premium = is_premium_code(premium_code)
-    
+
     if premium:
         st.success("✅ Premium activado")
     else:
@@ -256,13 +256,12 @@ with st.sidebar:
             st.link_button("🛒 Comprar Premium (Mercado Pago)", mp_url)
         except Exception:
             st.markdown(f"[🛒 Comprar Premium (Mercado Pago)]({mp_url})")
-        # mostrar también el enlace completo (te gusta el link visible)
         st.caption("Link de pago (URL completa):")
         st.code(mp_url, language="text")
     else:
         st.info("Configurá MP_CHECKOUT_URL en st.secrets o variables de entorno para mostrar el botón de pago.")
 
-    # --- Filtros ---
+    # --- Filtros de scraping ---
     st.header("Filtros de scraping")
     only_private = st.checkbox(
         "Sólo dueño directo",
@@ -308,16 +307,19 @@ with st.sidebar:
     min_group_size = st.slider("Mínimo publicaciones por grupo", 2, 30, 3, step=1)
     pct_threshold = st.slider("% por debajo del promedio del grupo", 5, 60, 15, step=1)
 
-# Límites por plan (sin UI)
-PAGES_PER_YEAR = PREMIUM_PAGES_PER_YEAR if premium else FREE_PAGES_PER_YEAR
-ITEMS_PER_PAGE = PREMIUM_ITEMS_PER_PAGE if premium else FREE_ITEMS_PER_PAGE
-per_year_max_items = PAGES_PER_YEAR * ITEMS_PER_PAGE
+    # --- Límites por plan (SILENCIOSOS, sin UI) ---
+    PAGES_PER_YEAR = PREMIUM_PAGES_PER_YEAR if premium else FREE_PAGES_PER_YEAR
+    ITEMS_PER_PAGE = PREMIUM_ITEMS_PER_PAGE if premium else FREE_ITEMS_PER_PAGE
+    per_year_max_items = PAGES_PER_YEAR * ITEMS_PER_PAGE
+    # (si algún día querés verlos, activá este debug:)
+    # if False: st.caption(f"{PAGES_PER_YEAR} páginas/año × {ITEMS_PER_PAGE} avisos/página ≈ {per_year_max_items} avisos/año.")
 
-delay = st.number_input("Delay entre páginas (s)", min_value=0.1, value=0.8, step=0.1)
+    # --- Conectividad / rate limiting ---
+    delay = st.number_input("Delay entre páginas (s)", min_value=0.1, value=0.8, step=0.1)
     proxy = st.text_input("Proxy (http(s)://user:pass@host:puerto)", value=os.getenv("HTTP_PROXY", ""))
 
+# botón fuera del sidebar
 run = st.button("🔎 Buscar")
-
 # ─────────────────────────────────────────
 # Utilidades para Excel: autoajuste y Link compacto
 # ─────────────────────────────────────────
