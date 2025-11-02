@@ -57,15 +57,17 @@ if not cookies.get("uid"):
 _quota_raw = cookies.get("quota") or json.dumps({"count": 0, "ts": int(time.time())})
 quota = json.loads(_quota_raw)
 
+# ── reemplazar estas funciones ─────────────────────────
 def _persist_quota(q: dict):
-    expires = int(time.time()) + 30 * 24 * 3600  # 30 días
-    cookies.set("quota", json.dumps(q), expires=expires)
+    # guarda la cuota en la cookie cifrada
+    cookies["quota"] = json.dumps(q)
     cookies.save()
 
 def inc_search_count():
     quota["count"] = int(quota.get("count", 0)) + 1
     quota["ts"] = int(time.time())
     _persist_quota(quota)
+
 
 
 # ─────────────────────────────────────────
@@ -231,11 +233,12 @@ def is_premium_code(code: str | None) -> bool:
 # Sidebar: Plan + Filtros
 # ─────────────────────────────────────────
 with st.sidebar:
+    # --- Plan / Premium ---
     st.subheader("Plan")
     st.caption("Ingresá tu código Premium para desbloquear límites.")
     premium_code = st.text_input("Código Premium", type="password")
     premium = is_premium_code(premium_code)
-
+    
     if premium:
         st.success("✅ Premium activado")
     else:
@@ -244,6 +247,22 @@ with st.sidebar:
             f"{FREE_PAGES_PER_YEAR} páginas/año, {FREE_ITEMS_PER_PAGE} avisos/página."
         )
 
+    # --- Pago Premium (Mercado Pago) ---
+    st.divider()
+    st.subheader("¿Querés Premium?")
+    mp_url = st.secrets.get("MP_CHECKOUT_URL", os.getenv("MP_CHECKOUT_URL", ""))
+    if mp_url:
+        try:
+            st.link_button("🛒 Comprar Premium (Mercado Pago)", mp_url)
+        except Exception:
+            st.markdown(f"[🛒 Comprar Premium (Mercado Pago)]({mp_url})")
+        # mostrar también el enlace completo (te gusta el link visible)
+        st.caption("Link de pago (URL completa):")
+        st.code(mp_url, language="text")
+    else:
+        st.info("Configurá MP_CHECKOUT_URL en st.secrets o variables de entorno para mostrar el botón de pago.")
+
+    # --- Filtros ---
     st.header("Filtros de scraping")
     only_private = st.checkbox(
         "Sólo dueño directo",
@@ -356,18 +375,19 @@ def _write_df_with_links(writer: pd.ExcelWriter, df: pd.DataFrame, sheet_name: s
 # Acción principal
 # ─────────────────────────────────────────
 if run:
-    # Limitar búsquedas en plan Free (por COOKIE; 1 búsqueda por 30 días por navegador)
-    if not premium and int(quota.get("count", 0)) >= FREE_LIMIT_SEARCHES:
-        st.error(
-            f"Límite de {FREE_LIMIT_SEARCHES} búsqueda(s) alcanzado en este navegador (30 días). "
-            f"Ingresá un código premium para continuar."
-        )
-        st.stop()
-
-    # Contamos apenas inicia la búsqueda (evita reintentos infinitos)
+    # --- Límite Freemium por cookie (1 búsqueda por 30 días, configurable) ---
     if not premium:
+        already = int(quota.get("count", 0))
+        if already >= FREE_LIMIT_SEARCHES:
+            st.error(
+                f"Límite de {FREE_LIMIT_SEARCHES} búsqueda(s) alcanzado en este navegador. "
+                "Ingresá un código premium para continuar."
+            )
+            st.stop()
+        # cuenta esta búsqueda (persistente en cookie cifrada)
         inc_search_count()
 
+   
     years_to_query = list(range(year_min, year_max + 1))
     st.info(f"Estrategia: búsqueda por año individual → {years_to_query}")
 
