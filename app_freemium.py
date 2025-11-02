@@ -33,7 +33,7 @@ def _get_secret_or_env(key: str, default: str = "") -> str:
     return os.getenv(key, default)
 
 # Límites y parámetros de plan (por defecto listo para DEMO)
-FREE_LIMIT_SEARCHES     = int(_get_secret_or_env("FREE_LIMIT_SEARCHES",   "1"))  # ← SOLO 1 BÚSQUEDA FREE
+FREE_LIMIT_SEARCHES     = int(_get_secret_or_env("FREE_LIMIT_SEARCHES",   "2"))  # ← SOLO 1 BÚSQUEDA FREE
 FREE_PAGES_PER_YEAR     = int(_get_secret_or_env("FREE_PAGES_PER_YEAR",   "8"))
 FREE_ITEMS_PER_PAGE     = int(_get_secret_or_env("FREE_ITEMS_PER_PAGE",   "36"))
 PREMIUM_PAGES_PER_YEAR  = int(_get_secret_or_env("PREMIUM_PAGES_PER_YEAR","30"))
@@ -74,7 +74,7 @@ def inc_search_count():
 # UI base
 # ─────────────────────────────────────────
 st.set_page_config(page_title="Oportunidades ML (Scraping)", page_icon="🚗", layout="wide")
-st.title("🚗 Oportunidades en Autos & Camionetas — Scraping (sin API)")
+st.title("🚗 Oportunidades en Autos & Camionetas")
 st.caption(
     "Tenés 1 búsqueda gratis cada 30 días. Ingresa un código Premium para desbloquear límites."
 )
