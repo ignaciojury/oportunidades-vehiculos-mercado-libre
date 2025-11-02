@@ -72,27 +72,26 @@ def build_base_url(
     return urlunsplit(("https", base_host, path, query, ""))
 
 
-def canonicalize_ml_url(u: str, proxy_url: Optional[str] = None, timeout: int = 20) -> Tuple[str, Dict]:
-    """
-    Hace GET con redirects y devuelve:
-      - URL canónica (sin '/_Desde_###')
-      - meta: {'verification': bool}
-    """
+def canonicalize_ml_url(u: str, proxy_url: str | None = None, timeout: int = 20):
+    """Resuelve redirecciones y devuelve (url_canónica, meta). Marca verificación sólo si ML lo exige."""
     try:
-        r = requests.get(
-            u,
-            headers={"User-Agent": USER_AGENT},
-            proxies=_proxies(proxy_url),
-            timeout=timeout,
-            allow_redirects=True,
-        )
+        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AutoCotizador/1.0"}
+        proxies = {"http": proxy_url, "https": proxy_url} if proxy_url else None
+        r = requests.get(u, headers=headers, proxies=proxies, timeout=timeout, allow_redirects=True)
         r.raise_for_status()
-        url = re.sub(r"/_Desde_\d+/?$", "", r.url, flags=re.IGNORECASE)
-        return url, {"verification": ("account-verification" in r.url)}
-    except Exception:
-        # ante error, devolvemos lo que tengamos
-        return u, {"verification": False}
+        canon = r.url
+        canon = re.sub(r"/_Desde_\d+/?$", "", canon, flags=re.IGNORECASE)
 
+        # VERIFICACIÓN: sólo si realmente estamos en una ruta de verificación
+        needs_captcha = (
+            "/gz/account-verification" in r.url
+            or "/gz/security/verification" in r.url
+            or "/account-verification" in r.url
+        )
+        return canon, {"verification": needs_captcha}
+    except Exception:
+        # Si falla, no marcamos verificación (devolveremos la URL original)
+        return u, {"verification": False}
 
 def _parse_cards(html: str) -> List[dict]:
     """
