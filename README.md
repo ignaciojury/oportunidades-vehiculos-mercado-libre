@@ -1,135 +1,226 @@
-# Oportunidades en Mercado Libre (Autos & Camionetas)
+# Oportunidades ML (Scraping) — Freemium
 
-Buscador de **oportunidades** basado en scraping por año. Agrupa por **título + año**, calcula el **promedio del grupo** y detecta publicaciones **10–30%** por debajo del mercado. Incluye **exportación a Excel** con gráficos y **modo Freemium**.
-
-## Demo / App
-
-* Frontend: **Streamlit** (`app_freemium.py`)
-* Scraper: `utils/scraper.py`
-
-> **Nota legal:** Respetá los Términos de Uso del sitio objetivo. Este proyecto es educativo. El HTML de Mercado Libre puede cambiar sin aviso y el scraping puede verse limitado por verificaciones anti-bot.
+Buscador de oportunidades en Mercado Libre Autos con agrupación por **título + año**, normalización **ARS/USD**, y exportación a **Excel** con **links compactos** y **gráfica**. Incluye modelo **Freemium** con 1 búsqueda gratis por navegador cada 30 días (persistencia por **cookie cifrada**) y desbloqueo **Premium** mediante **código**.
 
 ---
 
-## Características
-
-* Búsqueda por **rango de años** (consulta año por año).
-* Filtros: **dueño directo**, precio (ARS), kilómetros, transmisión.
-* Agrupación por **título normalizado** y opción de **núcleo del título** (quita adjetivos comunes).
-* Detección de **oportunidades** con umbral configurable (% bajo el promedio del grupo).
-* **Excel**: auto-ajuste de columnas, hipervínculos compactos ("Abrir"), tablas y **gráfico** comparativo.
-* **Freemium/Premium** con límites por plan y **código premium**.
-
----
-
-## Requisitos
-
-`requirements.txt` sugerido:
-
-```
-streamlit
-pandas
-requests
-numpy
-xlsxwriter
-beautifulsoup4
-lxml
-```
-
-> Si usás un entorno virtual: `python -m venv .venv && source .venv/bin/activate` (Linux/Mac) o `./.venv/Scripts/activate` (Windows).
-
----
-
-## Estructura
+## 📦 Estructura recomendada
 
 ```
 .
-├── app_freemium.py        # App Streamlit (freemium)
-├── utils/
-│   └── scraper.py        # URL builder + scraper paginado
-├── requirements.txt
-├── README.md
-└── .gitignore
+├─ app_freemium.py
+├─ utils/
+│  └─ scraper.py
+├─ requirements.txt
+├─ README.md
+└─ .env              # opcional (o usar st.secrets)
 ```
 
----
-
-## Variables de entorno / Secrets
-
-Configuralas en **Streamlit Cloud** (Secrets) o como variables de entorno locales.
-
-* `FREE_LIMIT_SEARCHES` (int) – búsquedas por sesión en modo Free (por defecto `10`).
-* `FREE_PAGES_PER_YEAR` (int) – páginas por año en Free (por defecto `8`).
-* `FREE_ITEMS_PER_PAGE` (int) – avisos por página en Free (por defecto `36`).
-* `PREMIUM_PAGES_PER_YEAR` (int) – páginas por año en Premium (por defecto `30`).
-* `PREMIUM_ITEMS_PER_PAGE` (int) – avisos por página en Premium (por defecto `48`).
-* `PREMIUM_CODES` (str) – lista separada por comas con códigos válidos, p.ej.: `"code1,code2"`.
-
-> Localmente podés usar `.streamlit/secrets.toml` (pero **NO lo subas** al repo):
->
-> ```toml
-> PREMIUM_CODES = "code1,code2"
-> FREE_LIMIT_SEARCHES = 10
-> FREE_PAGES_PER_YEAR = 8
-> FREE_ITEMS_PER_PAGE = 36
-> PREMIUM_PAGES_PER_YEAR = 30
-> PREMIUM_ITEMS_PER_PAGE = 48
-> ```
+> **Nota**: `scraper.py` debe exponer `build_base_url(...)` y `scrape_list(...)`.
 
 ---
 
-## Ejecutar localmente
+## ✨ Funcionalidades
+
+* **Freemium con cookies**: 1 búsqueda gratis cada 30 días por navegador.
+* **Código Premium** (sidebar) para desbloquear límites de paginado/muestra.
+* **Normalización de precios** (detecta USD mal tipeado en ARS bajo umbral).
+* **Agrupación** por *título normalizado* + *año* con detección de infravalorados.
+* **Export a Excel** con:
+
+  * Autoajuste de columnas.
+  * Columna **Link** compacta (hipervínculo "Abrir").
+  * Hoja **Gráfico** (precio oportunidad vs promedio del grupo).
+* **Filtros**: rango de años, precio, km, transmisión, marca/modelo.
+
+---
+
+## ⚙️ Configuración (ENV o `st.secrets`)
+
+La app lee primero de `st.secrets` y luego de variables de entorno. Puedes usar **uno u otro**.
+
+### Opción A — `st.secrets` (Streamlit Cloud / local)
+
+Crea un archivo `.streamlit/secrets.toml` (local) o usa el editor de **Secrets** en Streamlit Cloud con este contenido de ejemplo:
+
+```toml
+# Límites Free/Premium
+FREE_LIMIT_SEARCHES = "1"            # ← 1 búsqueda FREE por navegador / 30 días
+FREE_PAGES_PER_YEAR = "8"
+FREE_ITEMS_PER_PAGE = "36"
+PREMIUM_PAGES_PER_YEAR = "30"
+PREMIUM_ITEMS_PER_PAGE = "48"
+
+# Códigos Premium (separados por coma)
+PREMIUM_CODES = "ABC123,XYZ999,VIP-2025"
+
+# Clave para cifrar cookie (cámbiala!)
+COOKIE_PASSWORD = "pon-una-clave-segura-larga"
+```
+
+### Opción B — `.env` (local, uvicorn/docker/etc.)
+
+Crea `.env` en la raíz (o exporta variables en tu shell):
+
+```env
+FREE_LIMIT_SEARCHES=1
+FREE_PAGES_PER_YEAR=8
+FREE_ITEMS_PER_PAGE=36
+PREMIUM_PAGES_PER_YEAR=30
+PREMIUM_ITEMS_PER_PAGE=48
+
+PREMIUM_CODES=ABC123,XYZ999,VIP-2025
+COOKIE_PASSWORD=pon-una-clave-segura-larga
+```
+
+> La app prioriza `st.secrets` sobre ENV. En producción, evita subir `.env` al repo.
+
+---
+
+## 🧩 Dependencias
+
+Archivo `requirements.txt` sugerido:
+
+```
+streamlit>=1.36
+pandas>=2.1
+numpy>=1.26
+requests>=2.31
+XlsxWriter>=3.1
+streamlit-cookies-manager>=0.2
+```
+
+Instala con:
 
 ```bash
 pip install -r requirements.txt
+```
+
+---
+
+## ▶️ Ejecución local
+
+```bash
+# 1) Clonar
+git clone https://github.com/tu-usuario/ml-autos-freemium.git
+cd ml-autos-freemium
+
+# 2) (Opcional) crear .venv
+python -m venv .venv
+source .venv/bin/activate  # Windows: .venv\Scripts\activate
+
+# 3) Dependencias
+pip install -r requirements.txt
+
+# 4) Configurar secrets o .env (ver arriba)
+
+# 5) Ejecutar
 streamlit run app_freemium.py
 ```
 
-> Si necesitás proxy residencial, pasalo por la UI o exportá `HTTP_PROXY` / `HTTPS_PROXY`.
+La app quedará disponible en `http://localhost:8501`.
 
 ---
 
-## Deploy en Streamlit Cloud
+## ☁️ Despliegue en Streamlit Community Cloud
 
-1. Subí el repo a GitHub (privado recomendado).
-2. En **Streamlit Cloud**, crea una app y seleccioná `app_freemium.py`.
-3. En **Secrets**, pegá las variables del bloque anterior.
-4. **Deploy**.
+1. **Sube** el repo a GitHub (público o privado).
+2. Entra a **share.streamlit.io** → **New app** → conecta el repo y selecciona `app_freemium.py` como *Main file*.
+3. En **Advanced settings → Secrets**, pega el bloque `secrets.toml` del ejemplo.
+4. (Opcional) **Variables de entorno** si no usas Secrets.
+5. Deploy ✅
 
-### Custom domain
+### Nota sobre límites Free y cookies
 
-* Configurá un dominio en las opciones del proyecto (CNAME en tu DNS → ver panel de Streamlit Cloud).
-
----
-
-## Uso
-
-1. Elegí filtros en la barra lateral (años, precio, kms, transmisión, *dueño directo*).
-2. Optativo: marca *Normalización agresiva* y *Núcleo del título* para agrupar variantes.
-3. Elegí el **umbral %** por debajo del promedio del grupo.
-4. Clic en **Buscar**.
-5. Exportá el Excel desde el botón **Descargar Excel**.
+* La cookie `ml_autos_quota` contiene `{count, ts}` y expira a los **30 días**.
+* El límite **FREE** (por defecto 1) bloquea nuevas búsquedas si la cookie indica uso ≥ límite.
+* Ingresar un **código Premium** válido en el sidebar desactiva los límites de muestra.
 
 ---
 
-## Limitaciones y recomendaciones
+## 🔑 Flujo de Premium por código
 
-* ML puede mostrar **verificación/captcha**; si ocurre seguido, **bajá la frecuencia** o usá **proxy residencial**.
-* El HTML cambia: si dejan de aparecer tarjetas, actualizá selectores en `scraper.py`.
-* El agrupamiento por título es heurístico; para mayor precisión, considerar **modelo ML** por modelo/versión.
+1. Genera y reparte **códigos** (p.ej. `ABC123`) a tus compradores manualmente o por tienda.
+2. Agrega esos códigos a `PREMIUM_CODES` (separados por coma) en `st.secrets` o ENV.
+3. El usuario ingresa el código en el **sidebar** → la app valida y **activa Premium**.
 
----
-
-## Roadmap (ideas)
-
-* Alertas por email/Telegram cuando se detecten nuevas oportunidades.
-* Histórico de precios por modelo.
-* Integración oficial con **API de Mercado Libre** cuando sea conveniente.
-* Pago con **Mercado Pago / Stripe** para códigos premium.
-* Panel admin simple para gestionar códigos y ver métricas.
+> En el futuro puedes migrar a un checkout (Mercado Pago / Stripe) que emita y valide **tokens** de acceso.
 
 ---
 
-## Licencia
+## 📤 Exportación a Excel
 
-Proyecto privado por ahora. Si se abre, sugerida **MIT** o **Apache-2.0**.
+* Hojas: **Resultados**, **Comparables**, **Oportunidades**, **ChartData**, **Gráfico**, **Resumen**.
+* Autoajuste de columnas y header centrado.
+* Columna **Link** compacta con hipervínculo de texto **"Abrir"** en lugar de URL larga.
+* Gráfico: *Precio oportunidad (mín)* vs *Promedio del grupo* por clave (título + año).
+
+---
+
+## 🧪 Variables que puedes tunear
+
+* `misprice_ars_threshold` (detección USD mal tipeado): por defecto **200.000**.
+* `PAGES_PER_YEAR`, `ITEMS_PER_PAGE` según plan.
+* `delay` y `proxy` (sidebar) para *rate-limit/antibot*.
+
+---
+
+## 🛡️ Notas legales
+
+Este proyecto es una herramienta de análisis. Respeta términos de uso de los sitios de destino. El autor no asume responsabilidad por el uso que hagas de los resultados.
+
+---
+
+## 🧾 Licencia
+
+Recomendado: **MIT** o **Apache-2.0** para facilitar adopción comercial. Crea un archivo `LICENSE` con una de estas plantillas:
+
+* MIT → [https://choosealicense.com/licenses/mit/](https://choosealicense.com/licenses/mit/)
+* Apache-2.0 → [https://choosealicense.com/licenses/apache-2.0/](https://choosealicense.com/licenses/apache-2.0/)
+
+---
+
+## 🤝 Contribuciones
+
+PRs bienvenidos. Abre issues con:
+
+* Descripción
+* Pasos para reproducir
+* Logs (si aplica)
+
+---
+
+## 📄 `.env.example`
+
+Copia/renombra a `.env` y ajusta valores:
+
+```env
+# Freemium (1 búsqueda free por 30 días)
+FREE_LIMIT_SEARCHES=1
+FREE_PAGES_PER_YEAR=8
+FREE_ITEMS_PER_PAGE=36
+
+# Premium
+PREMIUM_PAGES_PER_YEAR=30
+PREMIUM_ITEMS_PER_PAGE=48
+PREMIUM_CODES=ABC123,XYZ999,VIP-2025
+
+# Cookie
+COOKIE_PASSWORD=pon-una-clave-segura-larga
+```
+
+---
+
+## 🆘 FAQ
+
+**¿Necesito hacer el repo público para publicar?**
+No necesariamente. Streamlit Cloud soporta repos **privados** si conectas tu GitHub.
+
+**¿Cómo cambio el límite Free a 1 búsqueda?**
+Ya viene configurado (`FREE_LIMIT_SEARCHES=1`). Ajusta en `secrets` o ENV si quieres otro valor.
+
+**¿Dónde agrego los códigos Premium?**
+En `PREMIUM_CODES` separados por coma en `st.secrets` o `.env`.
+
+**¿Cómo cobro?**
+Inicialmente distribuye **códigos** manuales luego de cobrar por Mercado Pago/Stripe. Próximamente se puede integrar un webhook que genere códigos y los inserte en `PREMIUM_CODES`.
