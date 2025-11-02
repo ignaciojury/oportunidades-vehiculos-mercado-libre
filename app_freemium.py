@@ -1,29 +1,86 @@
-# app_freemium.py — Oportunidades ML (Scraping) con plan Freemium + Excel mejorado
+# app_freemium.py — Oportunidades ML (Scraping) con plan Freemium + Cookies + Excel mejorado
+# -*- coding: utf-8 -*-
+
 import os
 import re
+import json
+import time
+import uuid
 from datetime import datetime
 from dataclasses import asdict, is_dataclass
 from urllib.parse import urlsplit, urlunsplit
 
 import pandas as pd
-import streamlit as st
-import requests
 import numpy as np
+import requests
+import streamlit as st
+from streamlit_cookies_manager import EncryptedCookieManager
 
 from utils.scraper import build_base_url, scrape_list
 
 # ─────────────────────────────────────────
-# Config de página
+# Helpers de configuración / secretos
+# ─────────────────────────────────────────
+
+def _get_secret_or_env(key: str, default: str = "") -> str:
+    """Lee primero de st.secrets si existe, luego de variables de entorno."""
+    try:
+        if hasattr(st, "secrets") and key in st.secrets:
+            val = st.secrets.get(key)
+            return str(val) if val is not None else default
+    except Exception:
+        pass
+    return os.getenv(key, default)
+
+# Límites y parámetros de plan (por defecto listo para DEMO)
+FREE_LIMIT_SEARCHES     = int(_get_secret_or_env("FREE_LIMIT_SEARCHES",   "1"))  # ← SOLO 1 BÚSQUEDA FREE
+FREE_PAGES_PER_YEAR     = int(_get_secret_or_env("FREE_PAGES_PER_YEAR",   "8"))
+FREE_ITEMS_PER_PAGE     = int(_get_secret_or_env("FREE_ITEMS_PER_PAGE",   "36"))
+PREMIUM_PAGES_PER_YEAR  = int(_get_secret_or_env("PREMIUM_PAGES_PER_YEAR","30"))
+PREMIUM_ITEMS_PER_PAGE  = int(_get_secret_or_env("PREMIUM_ITEMS_PER_PAGE","48"))
+
+# Códigos premium (separados por coma)
+PREMIUM_CODES = {c.strip() for c in _get_secret_or_env("PREMIUM_CODES", "").split(",") if c.strip()}
+
+# Cookie cifrada (persistencia por navegador)
+COOKIE_PASSWORD = _get_secret_or_env("COOKIE_PASSWORD", "cambia_esto_en_secrets")
+cookies = EncryptedCookieManager(prefix="ml_autos_", password=COOKIE_PASSWORD)
+if not cookies.ready():
+    st.stop()  # Streamlit necesita un render para inicializar cookies
+
+# UID por navegador
+if not cookies.get("uid"):
+    cookies["uid"] = str(uuid.uuid4())
+    cookies.save()
+
+# Estado de cuota en cookie (JSON: {count, ts})
+_quota_raw = cookies.get("quota") or json.dumps({"count": 0, "ts": int(time.time())})
+quota = json.loads(_quota_raw)
+
+def _persist_quota(q: dict):
+    expires = int(time.time()) + 30 * 24 * 3600  # 30 días
+    cookies.set("quota", json.dumps(q), expires=expires)
+    cookies.save()
+
+def inc_search_count():
+    quota["count"] = int(quota.get("count", 0)) + 1
+    quota["ts"] = int(time.time())
+    _persist_quota(quota)
+
+
+# ─────────────────────────────────────────
+# UI base
 # ─────────────────────────────────────────
 st.set_page_config(page_title="Oportunidades ML (Scraping)", page_icon="🚗", layout="wide")
 st.title("🚗 Oportunidades en Autos & Camionetas — Scraping (sin API)")
 st.caption(
-    "Freemium: búsqueda por año dentro de rango, consolida, agrupa por TÍTULO y AÑO, calcula promedio ARS por grupo y detecta oportunidades."
+    "Freemium con cookies: 1 búsqueda gratis por navegador cada 30 días. Ingresa un código Premium para desbloquear límites."
 )
 
 # ─────────────────────────────────────────
-# Helpers
+# Funciones auxiliares de datos
 # ─────────────────────────────────────────
+
 def fmt_money(x):
     try:
         return f"{float(x):,.0f}".replace(",", ".")
@@ -95,7 +152,6 @@ def title_norm_aggressive(t: str) -> str:
     s = re.sub(r"\s+", " ", s).strip()
     return s
 
-
 _STOPWORDS_DESC = {
     "impecable","excelente","único","unico","dueño","dueno","dueño unico","dueno unico",
     "permuto","permuta","urgente","oportunidad","full","pack","cuero",
@@ -103,7 +159,6 @@ _STOPWORDS_DESC = {
     "financio","financiacion","u$s","usd","dolares","dólares",
     "km","kms","km reales","poco uso","segunda mano","primer dueño","primer dueno"
 }
-
 
 def title_core(s: str) -> str:
     s = title_norm_aggressive(s)
@@ -129,8 +184,8 @@ def build_groups_by_keys(df: pd.DataFrame, key_cols: list[str], min_group_size: 
 
     g = (
         tmp.groupby(kcols, dropna=False)["price_ars"]
-        .agg(group_mean_ars="mean", group_n="count")
-        .reset_index()
+           .agg(group_mean_ars="mean", group_n="count")
+           .reset_index()
     )
 
     g_valid = g[g["group_n"] >= min_group_size].copy()
@@ -164,33 +219,20 @@ def _log_to_dict(x):
     return {"value": str(x)}
 
 
-# ─────────────────────────────────────────
-# Freemium: detección de plan y límites
-# ─────────────────────────────────────────
-FREE_LIMIT_SEARCHES = int(os.getenv("FREE_LIMIT_SEARCHES", "10"))
-FREE_PAGES_PER_YEAR = int(os.getenv("FREE_PAGES_PER_YEAR", "8"))
-FREE_ITEMS_PER_PAGE = int(os.getenv("FREE_ITEMS_PER_PAGE", "36"))
-
-PREMIUM_PAGES_PER_YEAR = int(os.getenv("PREMIUM_PAGES_PER_YEAR", "30"))
-PREMIUM_ITEMS_PER_PAGE = int(os.getenv("PREMIUM_ITEMS_PER_PAGE", "48"))
-
-PREMIUM_CODES = {
-    c.strip() for c in os.getenv("PREMIUM_CODES", "").split(",") if c.strip()
-}
-
-
 def is_premium_code(code: str | None) -> bool:
     if not code:
         return False
     if not PREMIUM_CODES:
-        # Si no hay códigos configurados, consideramos cualquier código como válido para pruebas
+        # Si no configuraste códigos aún, cualquier código sirve (modo pruebas)
         return True
     return code in PREMIUM_CODES
 
-
+# ─────────────────────────────────────────
+# Sidebar: Plan + Filtros
+# ─────────────────────────────────────────
 with st.sidebar:
     st.subheader("Plan")
-    st.caption("Ingresa tu código premium para desbloquear límites.")
+    st.caption("Ingresá tu código Premium para desbloquear límites.")
     premium_code = st.text_input("Código Premium", type="password")
     premium = is_premium_code(premium_code)
 
@@ -198,17 +240,10 @@ with st.sidebar:
         st.success("✅ Premium activado")
     else:
         st.info(
-            f"Plan Free: hasta {FREE_LIMIT_SEARCHES} búsquedas por sesión, "
+            f"Plan Free: hasta {FREE_LIMIT_SEARCHES} búsqueda(s) por navegador/30d, "
             f"{FREE_PAGES_PER_YEAR} páginas/año, {FREE_ITEMS_PER_PAGE} avisos/página."
         )
 
-    if "searches_used" not in st.session_state:
-        st.session_state.searches_used = 0
-
-# ─────────────────────────────────────────
-# Sidebar de filtros
-# ─────────────────────────────────────────
-with st.sidebar:
     st.header("Filtros de scraping")
     only_private = st.checkbox(
         "Sólo dueño directo",
@@ -218,7 +253,6 @@ with st.sidebar:
     usd_ars = st.number_input("USD → ARS", min_value=1, value=1350, step=1)
     misprice_th = st.number_input("Asumir USD si ARS < X", min_value=10_000, value=200_000, step=10_000)
 
-    # Rango de años libre; los límites de muestra se aplican por plan
     year_min, year_max = st.slider("Rango de años (consulta año por año)", 1980, 2035, (2016, 2023), step=1)
 
     price_min, price_max = st.slider("Precio (ARS)", 0, 120_000_000, (0, 40_000_000), step=100_000)
@@ -235,9 +269,9 @@ with st.sidebar:
         help="Si elegís EXACTAMENTE una, se agrega en la ruta (automatica/manual/cvt).",
     )
 
-    st.subheader("Marca / Modelo manual (no rompe nada)")
-    brand_text = st.text_input("Marca contiene… (opcional)", value="", help="Ej: toyota, peugeot, ford")
-    model_text = st.text_input("Modelo contiene… (opcional)", value="", help="Ej: corolla, 208, fiesta")
+    st.subheader("Marca / Modelo manual (opcional)")
+    brand_text = st.text_input("Marca contiene…", value="", help="Ej: toyota, peugeot, ford")
+    model_text = st.text_input("Modelo contiene…", value="", help="Ej: corolla, 208, fiesta")
     match_all_words = st.checkbox(
         "Coincidir todas las palabras",
         value=True,
@@ -249,7 +283,8 @@ with st.sidebar:
         "Normalización agresiva del título", value=False, help="Quita tildes/símbolos para juntar variantes similares."
     )
     use_title_core = st.checkbox(
-        "Usar 'núcleo' del título (quita adjetivos)", value=False, help="Amplía grupos removiendo palabras como 'impecable', 'gnc', etc."
+        "Usar 'núcleo' del título (quita adjetivos)", value=False,
+        help="Amplía grupos removiendo palabras como 'impecable', 'gnc', etc."
     )
     min_group_size = st.slider("Mínimo publicaciones por grupo", 2, 30, 3, step=1)
     pct_threshold = st.slider("% por debajo del promedio del grupo", 5, 60, 15, step=1)
@@ -263,9 +298,7 @@ with st.sidebar:
         ITEMS_PER_PAGE = FREE_ITEMS_PER_PAGE
 
     per_year_max_items = PAGES_PER_YEAR * ITEMS_PER_PAGE
-    st.caption(
-        f"{PAGES_PER_YEAR} páginas/año × {ITEMS_PER_PAGE} avisos/página ≈ {per_year_max_items} avisos/año."
-    )
+    st.caption(f"{PAGES_PER_YEAR} páginas/año × {ITEMS_PER_PAGE} avisos/página ≈ {per_year_max_items} avisos/año.")
 
     delay = st.number_input("Delay entre páginas (s)", min_value=0.1, value=0.8, step=0.1)
     proxy = st.text_input("Proxy (http(s)://user:pass@host:puerto)", value=os.getenv("HTTP_PROXY", ""))
@@ -281,9 +314,7 @@ def _autofit_worksheet(ws, df: pd.DataFrame, max_width: int = 60, min_width: int
     if df is None or df.empty:
         return
     for idx, col in enumerate(df.columns):
-        # Longitud del header
         max_len = len(str(col))
-        # Longitud de celdas
         col_values = df[col].astype(str).fillna("")
         max_len = max(max_len, col_values.map(len).max())
         width = min(max_width, max(min_width, max_len + 2))
@@ -297,7 +328,6 @@ def _write_df_with_links(writer: pd.ExcelWriter, df: pd.DataFrame, sheet_name: s
     link_present = link_col in df2.columns
 
     if link_present:
-        # Crear columna visible 'Link' y quitar permalink largo
         insert_at = list(df2.columns).index(link_col)
         df2.insert(insert_at, link_title, "Ver")
         df2.drop(columns=[link_col], inplace=True)
@@ -305,39 +335,38 @@ def _write_df_with_links(writer: pd.ExcelWriter, df: pd.DataFrame, sheet_name: s
     df2.to_excel(writer, index=False, sheet_name=sheet_name)
     ws = writer.sheets[sheet_name]
 
-    # Formatos
     wb = writer.book
     fmt_header = wb.add_format({"align": "center", "valign": "vcenter", "bold": True})
     ws.set_row(0, None, fmt_header)
     ws.freeze_panes(1, 0)
 
     if link_present:
-        # Reescribir la columna visible como hipervínculos compactos
         link_col_idx = list(df2.columns).index(link_title)
         fmt_link = wb.add_format({"font_color": "blue", "underline": 1, "align": "center"})
-        # Iterar desde fila 1 (después del header)
         for r, url in enumerate(df[link_col].fillna(""), start=1):
             if isinstance(url, str) and url.strip():
                 ws.write_url(r, link_col_idx, url, fmt_link, string="Abrir")
             else:
-                # Dejar texto vacío (o "-")
                 ws.write(r, link_col_idx, "-")
 
     _autofit_worksheet(ws, df2)
 
 
 # ─────────────────────────────────────────
-# Acción
+# Acción principal
 # ─────────────────────────────────────────
 if run:
-    # Limitar búsquedas en plan Free
+    # Limitar búsquedas en plan Free (por COOKIE; 1 búsqueda por 30 días por navegador)
+    if not premium and int(quota.get("count", 0)) >= FREE_LIMIT_SEARCHES:
+        st.error(
+            f"Límite de {FREE_LIMIT_SEARCHES} búsqueda(s) alcanzado en este navegador (30 días). "
+            f"Ingresá un código premium para continuar."
+        )
+        st.stop()
+
+    # Contamos apenas inicia la búsqueda (evita reintentos infinitos)
     if not premium:
-        if st.session_state.searches_used >= FREE_LIMIT_SEARCHES:
-            st.error(
-                f"Límite de {FREE_LIMIT_SEARCHES} búsquedas alcanzado en este modo. Ingresá un código premium para continuar."
-            )
-            st.stop()
-        st.session_state.searches_used += 1
+        inc_search_count()
 
     years_to_query = list(range(year_min, year_max + 1))
     st.info(f"Estrategia: búsqueda por año individual → {years_to_query}")
@@ -345,14 +374,14 @@ if run:
     rows_all: list[dict] = []
     logs_all: list[dict] = []
     total_by_year = []
-    seen_links_all = set()  # <- DEDUPE GLOBAL POR AVISO
+    seen_links_all = set()  # DEDUPE GLOBAL POR AVISO
 
     # 1) Scraping por cada año del rango
     for y in years_to_query:
         base_url_y = build_base_url(
             dueno_directo=only_private,
             year_min=y,
-            year_max=y,  # consulta "por año"
+            year_max=y,
             price_min_ars=price_min,
             price_max_ars=price_max,
             km_min=km_min,
@@ -360,7 +389,6 @@ if run:
             transmissions=transmissions,
         )
 
-        # Canonicalizamos ANTES de paginar
         seed_url = canonicalize_ml_url(base_url_y, proxy.strip() or None)
         st.markdown(f"• Año {y}: <{seed_url}>")
 
@@ -373,7 +401,6 @@ if run:
                 delay_s=delay,
             )
 
-        # Logs de este año (en forma dict) + metadata
         for lg in logs_y:
             d = _log_to_dict(lg)
             d["year_query"] = y
@@ -381,7 +408,6 @@ if run:
             d["base_url_orig"] = base_url_y
             logs_all.append(d)
 
-        # Filtrar duplicados GLOBALMENTE + imputar año si falta
         added = 0
         for r in (rows_y or []):
             r = dict(r)
@@ -396,10 +422,6 @@ if run:
             added += 1
 
         total_by_year.append({"year": y, "items": added})
-
-        # respiro entre años (ya controlado por delay_s en scrape_list)
-        if delay and delay > 0:
-            pass
 
     # 2) Resumen por año y logs
     df_years = pd.DataFrame(total_by_year)
@@ -422,14 +444,10 @@ if run:
 
     df = pd.DataFrame(rows_all)
 
-    # De-dupe defensivo por si quedara algo
+    # De-dupe defensivo
     if "_permalink_key" not in df.columns:
         df["_permalink_key"] = df["permalink"].fillna("").map(_canonical_link)
-    df = (
-        df.dropna(subset=["_permalink_key"])\
-          .drop_duplicates(subset=["_permalink_key"], keep="first")\
-          .reset_index(drop=True)
-    )
+    df = df.dropna(subset=["_permalink_key"]).drop_duplicates(subset=["_permalink_key"], keep="first").reset_index(drop=True)
 
     # 3) Normalización ARS/USD
     extra = df.apply(
@@ -460,41 +478,24 @@ if run:
         if match_all_words:
             df_filtered = df_filtered[df_filtered["title_norm"].map(lambda s: contains_all(s, tokens_brand))]
         else:
-            df_filtered = df_filtered[
-                df_filtered["title_norm"].str.contains("|".join(tokens_brand), case=False, na=False)
-            ]
+            df_filtered = df_filtered[df_filtered["title_norm"].str.contains("|".join(tokens_brand), case=False, na=False)]
     if tokens_model:
         if match_all_words:
             df_filtered = df_filtered[df_filtered["title_norm"].map(lambda s: contains_all(s, tokens_model))]
         else:
-            df_filtered = df_filtered[
-                df_filtered["title_norm"].str.contains("|".join(tokens_model), case=False, na=False)
-            ]
+            df_filtered = df_filtered[df_filtered["title_norm"].str.contains("|".join(tokens_model), case=False, na=False)]
 
     st.caption(f"Publicaciones tras filtros manuales: **{len(df)} → {len(df_filtered)}**")
 
     # 6) Resultados crudos consolidados
     st.subheader("Resultados (consolidados de todos los años)")
     base_cols = [
-        "title",
-        "year",
-        "km",
-        "gearbox",
-        "price",
-        "currency",
-        "assumed_currency",
-        "price_usd",
-        "price_ars",
-        "state",
-        "city",
-        "permalink",
+        "title", "year", "km", "gearbox",
+        "price", "currency", "assumed_currency", "price_usd", "price_ars",
+        "state", "city", "permalink"
     ]
     base_cols = [c for c in base_cols if c in df_filtered.columns]
-    shown = (
-        df_filtered.sort_values(by=["year", "price_ars"], ascending=[True, True])
-        .reset_index(drop=True)[base_cols]
-        .copy()
-    )
+    shown = df_filtered.sort_values(by=["year", "price_ars"], ascending=[True, True]).reset_index(drop=True)[base_cols].copy()
     for c in ["price", "price_usd", "price_ars"]:
         if c in shown.columns:
             shown[c] = shown[c].apply(fmt_money)
@@ -522,9 +523,9 @@ if run:
 
     with st.expander("Top (título, año) repetidos"):
         top_pairs = (
-            df_filtered.dropna(subset=["title_group", "year"])\
-                .groupby(["title_group", "year"]).size().reset_index(name="n")\
-                .sort_values("n", ascending=False).head(50)
+            df_filtered.dropna(subset=["title_group", "year"]) \
+                      .groupby(["title_group", "year"]).size().reset_index(name="n") \
+                      .sort_values("n", ascending=False).head(50)
         )
         st.dataframe(top_pairs, use_container_width=True)
 
@@ -551,24 +552,13 @@ if run:
     # 10) Comparables
     st.markdown("### Comparables (por clave de agrupación)")
     comp_cols = [
-        "title",
-        "year",
-        "price",
-        "currency",
-        "assumed_currency",
-        "price_usd",
-        "price_ars",
-        "group_mean_ars",
-        "group_n",
-        "diff_ars",
-        "undervalue_pct",
-        "state",
-        "city",
-        "permalink",
+        "title","year","price","currency","assumed_currency","price_usd","price_ars",
+        "group_mean_ars","group_n","diff_ars","undervalue_pct",
+        "state","city","permalink"
     ]
     comp_cols = [c for c in comp_cols if c in comp_best.columns]
     comp_show = comp_best[comp_cols].copy()
-    for c in ["price", "price_usd", "price_ars", "group_mean_ars", "diff_ars"]:
+    for c in ["price","price_usd","price_ars","group_mean_ars","diff_ars"]:
         if c in comp_show.columns:
             comp_show[c] = comp_show[c].apply(fmt_money)
     if "undervalue_pct" in comp_show.columns:
@@ -580,7 +570,7 @@ if run:
         st.markdown("### 🟢 Oportunidades (por debajo del promedio del grupo)")
         opp_cols = [c for c in comp_cols if c in opp.columns]
         opp_show = opp[opp_cols].copy()
-        for c in ["price", "price_usd", "price_ars", "group_mean_ars", "diff_ars"]:
+        for c in ["price","price_usd","price_ars","group_mean_ars","diff_ars"]:
             if c in opp_show.columns:
                 opp_show[c] = opp_show[c].apply(fmt_money)
         if "undervalue_pct" in opp_show.columns:
@@ -593,7 +583,6 @@ if run:
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     fname = f"oportunidades_scraping_por_anio_{ts}.xlsx"
 
-    # En plan Free, opcionalmente podemos limitar filas exportadas (no lo bloqueamos, sólo si se quiere)
     export_df_results = shown.copy()
     export_df_comp = comp_best.copy()
     export_df_opp = opp.copy()
@@ -621,14 +610,7 @@ if run:
                 opp_xls = opp_xls.sort_values("diff_ars", ascending=False)
 
             cols_opp = [
-                "title",
-                "year",
-                "permalink",
-                "price_ars",
-                "group_mean_ars",
-                "group_n",
-                "diff_ars",
-                "undervalue_pct",
+                "title","year","permalink","price_ars","group_mean_ars","group_n","diff_ars","undervalue_pct"
             ]
             cols_opp = [c for c in cols_opp if c in opp_xls.columns]
             opp_xls = opp_xls[cols_opp]
@@ -638,7 +620,7 @@ if run:
                 "year": "Año",
                 "permalink": "Link",
                 "price_ars": "Precio ($ ARS)",
-                "group_mean_ars": "Precio De mercado promedio ($ ARS)",
+                "group_mean_ars": "Precio de mercado promedio ($ ARS)",
                 "group_n": "Tamaño del grupo analizado",
                 "diff_ars": "Diferencia ($ ARS)",
                 "undervalue_pct": "Porcentaje de diferencia",
@@ -646,18 +628,16 @@ if run:
             opp_xls.rename(columns=rename_map, inplace=True)
 
             # Escribir hoja con links compactos
-            # Tenemos que mapear de nuevo dónde estaba el permalink original para escribir URLs
             orig_permalink = export_df_opp["permalink"] if "permalink" in export_df_opp.columns else pd.Series([])
             opp_xls.to_excel(w, index=False, sheet_name="Oportunidades")
             ws_opp = w.sheets["Oportunidades"]
 
-            # Formatos centrados
             base_center = {"align": "center", "valign": "vcenter"}
             fmt_header = wb.add_format({**base_center, "bold": True})
-            fmt_text = wb.add_format({**base_center})
-            fmt_money = wb.add_format({**base_center, "num_format": "#,##0"})
-            fmt_int = wb.add_format({**base_center, "num_format": "0"})
-            fmt_pct = wb.add_format({**base_center, "num_format": "0%"})
+            fmt_text   = wb.add_format({**base_center})
+            fmt_money  = wb.add_format({**base_center, "num_format": "#,##0"})
+            fmt_int    = wb.add_format({**base_center, "num_format": "0"})
+            fmt_pct    = wb.add_format({**base_center, "num_format": "0%"})
 
             ws_opp.set_row(0, None, fmt_header)
             ws_opp.freeze_panes(1, 0)
@@ -666,14 +646,13 @@ if run:
             if "Link" in opp_xls.columns and len(orig_permalink) == len(opp_xls):
                 col_idx = list(opp_xls.columns).index("Link")
                 fmt_link = wb.add_format({"font_color": "blue", "underline": 1, "align": "center"})
-                for r, url in enumerate(orig_permalink.fillna("") , start=1):
+                for r, url in enumerate(orig_permalink.fillna(""), start=1):
                     if isinstance(url, str) and url.strip():
                         ws_opp.write_url(r, col_idx, url, fmt_link, string="Abrir")
                     else:
                         ws_opp.write(r, col_idx, "-")
 
             # Autoajustes
-            # A: Vehículo, B: Año, C: Link, D: Precio, E: Promedio, F: Tamaño grupo, G: Diferencia, H: %
             ws_opp.set_column("A:A", 55, fmt_text)
             ws_opp.set_column("B:B", 10, fmt_int)
             ws_opp.set_column("C:C", 12, fmt_text)  # Link compacto
@@ -685,16 +664,14 @@ if run:
 
             # Datos para el gráfico (mínimo por grupo vs promedio)
             label_base = export_df_opp["title_group"] if "title_group" in export_df_opp.columns else export_df_opp["title"]
-            chart_df = pd.DataFrame(
-                {
-                    "label": label_base.astype(str) + " (" + export_df_opp["year"].astype("Int64").astype(str) + ")",
-                    "precio_min_ars": export_df_opp["price_ars"],
-                    "promedio_grupo_ars": export_df_opp["group_mean_ars"],
-                }
-            )
-            chart_df = (
-                chart_df.groupby("label", as_index=False)
-                .agg(precio_min_ars=("precio_min_ars", "min"), promedio_grupo_ars=("promedio_grupo_ars", "first"))
+            chart_df = pd.DataFrame({
+                "label": label_base.astype(str) + " (" + export_df_opp["year"].astype("Int64").astype(str) + ")",
+                "precio_min_ars": export_df_opp["price_ars"],
+                "promedio_grupo_ars": export_df_opp["group_mean_ars"],
+            })
+            chart_df = chart_df.groupby("label", as_index=False).agg(
+                precio_min_ars=("precio_min_ars", "min"),
+                promedio_grupo_ars=("promedio_grupo_ars", "first")
             )
 
             chart_df.to_excel(w, index=False, sheet_name="ChartData")
@@ -702,21 +679,17 @@ if run:
             _autofit_worksheet(ws_cd, chart_df)
 
             chart = wb.add_chart({"type": "column"})
-            last_row = len(chart_df) + 1  # +1 por header
-            chart.add_series(
-                {
-                    "name": "Precio oportunidad (mín)",
-                    "categories": ["ChartData", 1, 0, last_row - 1, 0],
-                    "values": ["ChartData", 1, 1, last_row - 1, 1],
-                }
-            )
-            chart.add_series(
-                {
-                    "name": "Promedio del grupo",
-                    "categories": ["ChartData", 1, 0, last_row - 1, 0],
-                    "values": ["ChartData", 1, 2, last_row - 1, 2],
-                }
-            )
+            last_row = len(chart_df) + 1
+            chart.add_series({
+                "name": "Precio oportunidad (mín)",
+                "categories": ["ChartData", 1, 0, last_row - 1, 0],
+                "values":     ["ChartData", 1, 1, last_row - 1, 1],
+            })
+            chart.add_series({
+                "name": "Promedio del grupo",
+                "categories": ["ChartData", 1, 0, last_row - 1, 0],
+                "values":     ["ChartData", 1, 2, last_row - 1, 2],
+            })
             chart.set_title({"name": "Precio vs Promedio por grupo (título + año)"})
             chart.set_x_axis({"name": "Grupo"})
             chart.set_y_axis({"name": "Precio ARS"})
@@ -728,6 +701,10 @@ if run:
         # Resumen / metadatos
         meta_rows = []
         meta_rows.append(("plan", "premium" if premium else "free"))
+        meta_rows.append(("free_searches_limit", str(FREE_LIMIT_SEARCHES)))
+        meta_rows.append(("searches_used_cookie", str(quota.get("count", 0))))
+        meta_rows.append(("pages_per_year", str(PAGES_PER_YEAR)))
+        meta_rows.append(("items_per_page", str(ITEMS_PER_PAGE)))
         if "years_to_query" in locals():
             meta_rows.append(("years_queried", ", ".join(map(str, years_to_query))))
         meta_rows.append(("opportunities_count", 0 if export_df_opp.empty else len(export_df_opp)))
@@ -746,6 +723,4 @@ if run:
 # ─────────────────────────────────────────
 # Footer
 # ─────────────────────────────────────────
-st.markdown(
-    "---\n**Freemium**: esta demo limita páginas y búsquedas por sesión. Para desbloquear todo, ingresa tu código premium en la barra lateral."
-)
+st.markdown("---\n**Freemium**: 1 búsqueda gratis/30 días por navegador. Para desbloquear todo, ingresá tu código Premium en la barra lateral.")
