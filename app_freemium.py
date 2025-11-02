@@ -386,100 +386,106 @@ def _write_df_with_links(writer: pd.ExcelWriter, df: pd.DataFrame, sheet_name: s
 # ─────────────────────────────────────────
 # Acción
 # ─────────────────────────────────────────
+# ─────────────────────────────────────────
+# Acción
+# ─────────────────────────────────────────
 if run:
-    # --- Límite Freemium por cookie (1 búsqueda por 30 días, configurable) ---
+    # Freemium por cookie (1 búsqueda cada 30 días, configurable en secrets)
     if not premium:
         already = int(quota.get("count", 0))
         if already >= FREE_LIMIT_SEARCHES:
             st.error(
-                f"Límite de {FREE_LIMIT_SEARCHES} búsqueda(s) alcanzado en este navegador. "
+                f"Límite de {FREE_LIMIT_SEARCHES} búsqueda(s) alcanzado en este navegador (válido por 30 días). "
                 "Ingresá un código premium para continuar."
             )
-        else:
-            # cuenta esta búsqueda (persistente en cookie cifrada)
-            inc_search_count()
+            st.stop()
+        inc_search_count()
 
-    # --- Aseguramos que no seguimos si se alcanzó el límite ---
-    if not premium and int(quota.get("count", 0)) > FREE_LIMIT_SEARCHES:
-        st.stop()
+    # Límites internos según plan (sin mostrar controles)
+    if premium:
+        PAGES_PER_YEAR = PREMIUM_PAGES_PER_YEAR
+        ITEMS_PER_PAGE = PREMIUM_ITEMS_PER_PAGE
+    else:
+        PAGES_PER_YEAR = FREE_PAGES_PER_YEAR
+        ITEMS_PER_PAGE = FREE_ITEMS_PER_PAGE
+    per_year_max_items = PAGES_PER_YEAR * ITEMS_PER_PAGE
 
-    # --- DEFINIR years_to_query ANTES DEL BUCLE ---
     years_to_query = list(range(int(year_min), int(year_max) + 1))
     st.info(f"Estrategia: búsqueda por año individual → {years_to_query}")
 
     rows_all: list[dict] = []
     logs_all: list[dict] = []
     total_by_year = []
-    seen_links_all = set()  # DEDUPE GLOBAL POR AVISO
+    seen_links_all = set()
 
-    # ─────────────────────────────────────────
-    # 1) Scraping por cada año del rango
-    # ─────────────────────────────────────────
+    # 1) Scraping por cada año
     for y in years_to_query:
-    base_url_y = build_base_url(
-        dueno_directo=only_private,
-        year_min=y, year_max=y,
-        price_min_ars=price_min, price_max_ars=price_max,
-        km_min=km_min, km_max=km_max,
-        transmissions=transmissions,
-    )
-
-    seed_url, seed_meta = canonicalize_ml_url(base_url_y, proxy.strip() or None)
-    st.markdown(f"• Año {y}: <{seed_url}>")
-
-    # Captcha manual (si redirige a verificación)
-    is_verif = bool(seed_meta.get("verification")) or ("account-verification" in seed_url)
-    if is_verif:
-        st.warning(
-            "⚠️ Mercado Libre solicitó verificación/captcha.\n"
-            "Abrí el enlace de arriba en tu navegador, resolvelo, copiá la URL final "
-            "y pegala abajo para continuar."
-        )
-        st.code(seed_url)
-        manual_url = st.text_input(
-            f"Pegá aquí la URL verificada después del captcha (año {y}):",
-            "",
-            key=f"manual_url_{y}",
-            help="Debe empezar con https://autos.mercadolibre.com.ar/…"
-        )
-        if manual_url.strip():
-            seed_url = manual_url.strip()
-            st.success("✅ Usando la URL verificada manualmente.")
-        else:
-            st.stop()
-
-    with st.spinner(f"Scrapeando año {y}…"):
-        rows_y, logs_y = scrape_list(
-            base_url=seed_url,
-            max_items=per_year_max_items,
-            max_pages=PAGES_PER_YEAR,
-            proxy_url=proxy.strip() or None,
-            delay_s=delay,
+        base_url_y = build_base_url(
+            dueno_directo=only_private,
+            year_min=y, year_max=y,
+            price_min_ars=price_min, price_max_ars=price_max,
+            km_min=km_min, km_max=km_max,
+            transmissions=transmissions,
         )
 
-    for lg in (logs_y or []):
-        d = _log_to_dict(lg)
-        d["year_query"] = y
-        d["base_url_seed"] = seed_url
-        d["base_url_orig"] = base_url_y
-        logs_all.append(d)
+        seed_url, seed_meta = canonicalize_ml_url(base_url_y, proxy.strip() or None)
+        st.markdown(f"• Año {y}: <{seed_url}>")
 
-    added = 0
-    for r in (rows_y or []):
-        r = dict(r)
-        k = _canonical_link(r.get("permalink", ""))
-        if not k or k in seen_links_all:
-            continue
-        seen_links_all.add(k)
-        r["_permalink_key"] = k
-        if r.get("year") in [None, "", 0]:
-            r["year"] = y
-        rows_all.append(r)
-        added += 1
+        # Si Mercado Libre pide verificación/captcha, permitir resolver manualmente
+        is_verif = bool(seed_meta.get("verification")) or ("account-verification" in seed_url)
+        if is_verif:
+            st.warning(
+                "⚠️ Mercado Libre solicitó verificación/captcha.\n"
+                "Abrí el enlace de arriba en tu navegador, resolvelo, copiá la URL final "
+                "y pegala abajo para continuar."
+            )
+            st.code(seed_url)
+            manual_url = st.text_input(
+                f"Pegá aquí la URL verificada después del captcha (año {y}):",
+                "",
+                key=f"manual_url_{y}",
+                help="Debe empezar con https://autos.mercadolibre.com.ar/…"
+            )
+            if manual_url.strip():
+                seed_url = manual_url.strip()
+                st.success("✅ Usando la URL verificada manualmente.")
+            else:
+                st.stop()
 
-    total_by_year.append({"year": y, "items": added})
+        with st.spinner(f"Scrapeando año {y}…"):
+            rows_y, logs_y = scrape_list(
+                base_url=seed_url,
+                max_items=per_year_max_items,
+                max_pages=PAGES_PER_YEAR,
+                proxy_url=proxy.strip() or None,
+                delay_s=float(delay),
+            )
 
-    # Resumen por año y logs
+        # Acumular logs
+        for lg in (logs_y or []):
+            d = _log_to_dict(lg)
+            d["year_query"] = y
+            d["base_url_seed"] = seed_url
+            d["base_url_orig"] = base_url_y
+            logs_all.append(d)
+
+        # De-dupe global + imputar año faltante
+        added = 0
+        for r in (rows_y or []):
+            r = dict(r)
+            k = _canonical_link(r.get("permalink", ""))
+            if not k or k in seen_links_all:
+                continue
+            seen_links_all.add(k)
+            r["_permalink_key"] = k
+            if r.get("year") in [None, "", 0]:
+                r["year"] = y
+            rows_all.append(r)
+            added += 1
+
+        total_by_year.append({"year": y, "items": added})
+
+    # 2) Resumen por año y logs
     df_years = pd.DataFrame(total_by_year)
     st.subheader("Resumen por año")
     if not df_years.empty:
@@ -488,43 +494,37 @@ if run:
     else:
         st.write("Sin datos por año.")
 
-    with st.expander("🧪 Logs por página / meta"):
+    with st.expander("🧪 Logs por página (todas las consultas)"):
         df_logs = pd.DataFrame(logs_all)
         st.dataframe(df_logs, use_container_width=True) if not df_logs.empty else st.write("Sin logs.")
 
     if not rows_all:
-        st.warning("No se encontraron publicaciones. Si ves verificación/captcha en logs, usá proxy residencial y/o aumentá delay.")
+        st.warning(
+            "No se encontraron publicaciones. Si ves verificación en logs, probá con proxy residencial o más delay."
+        )
         st.stop()
 
-    # DataFrame
     df = pd.DataFrame(rows_all)
 
-    # De-dupe defensivo
+    # 3) De-dupe defensivo
     if "_permalink_key" not in df.columns:
         df["_permalink_key"] = df["permalink"].fillna("").map(_canonical_link)
-    df = df.dropna(subset=["_permalink_key"]).drop_duplicates(subset=["_permalink_key"], keep="first").reset_index(drop=True)
+    df = df.dropna(subset=["_permalink_key"]).drop_duplicates(subset=["_permalink_key"]).reset_index(drop=True)
 
-    # Normalización ARS/USD
-    extra = df.apply(lambda r: pd.Series(
-        normalize_price_ars(r.get("price"), r.get("currency"), usd_ars, misprice_th)
-    ), axis=1)
+    # 4) Normalización ARS/USD
+    extra = df.apply(
+        lambda r: pd.Series(normalize_price_ars(r.get("price"), r.get("currency"), usd_ars, misprice_th)), axis=1
+    )
     extra.columns = ["price_ars", "price_usd", "assumed_currency"]
     df = pd.concat([df, extra], axis=1)
     df["price_ars"] = pd.to_numeric(df["price_ars"], errors="coerce")
     df["year"] = pd.to_numeric(df.get("year"), errors="coerce").astype("Int64")
 
-    # Claves de agrupación
-    if aggressive:
-        df["title_norm"] = df["title"].map(title_norm_aggressive)
-    else:
-        df["title_norm"] = df["title"].map(title_norm_exact)
+    # 5) Claves de agrupación
+    df["title_norm"] = df["title"].map(title_norm_aggressive) if aggressive else df["title"].map(title_norm_exact)
+    df["title_group"] = df["title_norm"].map(title_core) if use_title_core else df["title_norm"]
 
-    if use_title_core:
-        df["title_group"] = df["title_norm"].map(title_core)
-    else:
-        df["title_group"] = df["title_norm"]
-
-    # Filtros manuales
+    # 6) Filtros manuales
     df_filtered = df.copy()
     tokens_brand = [t.strip() for t in brand_text.split()] if brand_text.strip() else []
     tokens_model = [t.strip() for t in model_text.split()] if model_text.strip() else []
@@ -542,7 +542,7 @@ if run:
 
     st.caption(f"Publicaciones tras filtros manuales: **{len(df)} → {len(df_filtered)}**")
 
-    # Resultados crudos
+    # 7) Resultados
     st.subheader("Resultados (consolidados de todos los años)")
     base_cols = [
         "title","year","km","gearbox",
@@ -554,32 +554,21 @@ if run:
     for c in ["price","price_usd","price_ars"]:
         if c in shown.columns:
             shown[c] = shown[c].apply(fmt_money)
-
     try:
         colcfg = {"permalink": st.column_config.LinkColumn("link")}
     except Exception:
         colcfg = {}
     st.dataframe(shown, use_container_width=True, column_config=colcfg)
 
-    # Top claves repetidas (debug)
-    with st.expander("Top claves de agrupación repetidas (título o núcleo)"):
-        vc = df_filtered["title_group"].value_counts().reset_index()
-        vc.columns = ["title_group", "n"]
-        st.dataframe(vc.head(50), use_container_width=True)
-
-    # Comparables por título + año
-    df_filtered["year"] = pd.to_numeric(df_filtered.get("year"), errors="coerce").astype("Int64")
+    # 8) Comparables por título + año
     comp_base = df_filtered.dropna(subset=["title_group", "year", "price_ars"]).copy()
-
-    comp_best, stats = build_groups_by_keys(
-        comp_base, key_cols=["title_group", "year"], min_group_size=min_group_size
-    )
+    comp_best, stats = build_groups_by_keys(comp_base, key_cols=["title_group", "year"], min_group_size=min_group_size)
 
     with st.expander("Top (título, año) repetidos"):
         top_pairs = (
             df_filtered.dropna(subset=["title_group", "year"])
-            .groupby(["title_group", "year"]).size().reset_index(name="n")
-            .sort_values("n", ascending=False).head(50)
+            .groupby(["title_group", "year"]).size()
+            .reset_index(name="n").sort_values("n", ascending=False).head(50)
         )
         st.dataframe(top_pairs, use_container_width=True)
 
@@ -587,10 +576,10 @@ if run:
         st.json(stats)
 
     if comp_best.empty:
-        st.info("Todavía no hay comparables con la configuración actual. Aumentá muestra, desactivá ‘Sólo dueño directo’, activá ‘núcleo del título’ o bajá el mínimo por grupo.")
+        st.info("Sin comparables suficientes. Probá ampliar muestra, activar 'núcleo del título' o bajar 'mínimo por grupo'.")
         st.stop()
 
-    # Oportunidades vs promedio del grupo
+    # 9) Oportunidades
     comp_best["diff_ars"] = comp_best["group_mean_ars"] - comp_best["price_ars"]
     comp_best["undervalue_pct"] = (comp_best["diff_ars"] / comp_best["group_mean_ars"]) * 100
     key_col = "_permalink_key" if "_permalink_key" in comp_best.columns else "permalink"
@@ -599,12 +588,10 @@ if run:
     opp = comp_best[comp_best["undervalue_pct"] >= pct_threshold].copy()
     opp = opp.sort_values(by=["undervalue_pct", "price_ars"], ascending=[False, True]).reset_index(drop=True)
 
-    # Comparables (tabla)
     st.markdown("### Comparables (por clave de agrupación)")
     comp_cols = [
         "title","year","price","currency","assumed_currency","price_usd","price_ars",
-        "group_mean_ars","group_n","diff_ars","undervalue_pct",
-        "state","city","permalink"
+        "group_mean_ars","group_n","diff_ars","undervalue_pct","state","city","permalink"
     ]
     comp_cols = [c for c in comp_cols if c in comp_best.columns]
     comp_show = comp_best[comp_cols].copy()
@@ -615,7 +602,6 @@ if run:
         comp_show["undervalue_pct"] = comp_show["undervalue_pct"].map(lambda x: f"{x:.1f}%")
     st.dataframe(comp_show, use_container_width=True, column_config=colcfg)
 
-    # Oportunidades (tabla)
     if not opp.empty:
         st.markdown("### 🟢 Oportunidades (por debajo del promedio del grupo)")
         opp_cols = [c for c in comp_cols if c in opp.columns]
@@ -627,9 +613,9 @@ if run:
             opp_show["undervalue_pct"] = opp_show["undervalue_pct"].map(lambda x: f"{x:.0f}%")
         st.dataframe(opp_show, use_container_width=True, column_config=colcfg)
     else:
-        st.info("No hay oportunidades con el umbral actual. Bajá el %, aumentá la muestra o activá ‘núcleo del título’.")
+        st.info("No hay oportunidades con el umbral actual. Bajá el %, aumentá muestra o activá 'núcleo del título'.")
 
-    # Export a Excel (autoajuste + Link compacto + gráfico)
+    # 10) Export a Excel con autoajuste + Link compacto
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     fname = f"oportunidades_scraping_por_anio_{ts}.xlsx"
 
@@ -640,7 +626,6 @@ if run:
     with pd.ExcelWriter(fname, engine="xlsxwriter") as w:
         if not export_df_results.empty:
             _write_df_with_links(w, export_df_results, sheet_name="Resultados", link_col="permalink", link_title="Link")
-
         if not export_df_comp.empty:
             _write_df_with_links(w, export_df_comp, sheet_name="Comparables", link_col="permalink", link_title="Link")
 
@@ -648,7 +633,7 @@ if run:
             wb = w.book
 
             opp_xls = export_df_opp.copy()
-            for c in ["price_ars","group_mean_ars","diff_ars","undervalue_pct","group_n"]:
+            for c in ["price_ars", "group_mean_ars", "diff_ars", "undervalue_pct", "group_n"]:
                 if c in opp_xls.columns:
                     opp_xls[c] = pd.to_numeric(opp_xls[c], errors="coerce")
             if "undervalue_pct" in opp_xls.columns:
@@ -656,9 +641,7 @@ if run:
             if "diff_ars" in opp_xls.columns:
                 opp_xls = opp_xls.sort_values("diff_ars", ascending=False)
 
-            cols_opp = [
-                "title","year","permalink","price_ars","group_mean_ars","group_n","diff_ars","undervalue_pct"
-            ]
+            cols_opp = ["title","year","permalink","price_ars","group_mean_ars","group_n","diff_ars","undervalue_pct"]
             cols_opp = [c for c in cols_opp if c in opp_xls.columns]
             opp_xls = opp_xls[cols_opp]
 
@@ -667,28 +650,26 @@ if run:
                 "year": "Año",
                 "permalink": "Link",
                 "price_ars": "Precio ($ ARS)",
-                "group_mean_ars": "Precio De mercado promedio ($ ARS)",
-                "group_n": "Tamaño del grupo analizado",
+                "group_mean_ars": "Precio de mercado promedio ($ ARS)",
+                "group_n": "Tamaño del grupo",
                 "diff_ars": "Diferencia ($ ARS)",
-                "undervalue_pct": "Porcentaje de diferencia",
+                "undervalue_pct": "Diferencia (%)",
             }
             opp_xls.rename(columns=rename_map, inplace=True)
 
-            # Escribir hoja
             orig_permalink = export_df_opp["permalink"] if "permalink" in export_df_opp.columns else pd.Series([])
             opp_xls.to_excel(w, index=False, sheet_name="Oportunidades")
             ws_opp = w.sheets["Oportunidades"]
 
             base_center = {"align": "center", "valign": "vcenter"}
             fmt_header = wb.add_format({**base_center, "bold": True})
-            fmt_text   = wb.add_format({**base_center})
-            fmt_money  = wb.add_format({**base_center, "num_format": "#,##0"})
-            fmt_int    = wb.add_format({**base_center, "num_format": "0"})
-            fmt_pct    = wb.add_format({**base_center, "num_format": "0%"})
+            fmt_text = wb.add_format({**base_center})
+            fmt_money = wb.add_format({**base_center, "num_format": "#,##0"})
+            fmt_int = wb.add_format({**base_center, "num_format": "0"})
+            fmt_pct = wb.add_format({**base_center, "num_format": "0%"})
             ws_opp.set_row(0, None, fmt_header)
             ws_opp.freeze_panes(1, 0)
 
-            # Link compacto
             if "Link" in opp_xls.columns and len(orig_permalink) == len(opp_xls):
                 col_idx = list(opp_xls.columns).index("Link")
                 fmt_link = wb.add_format({"font_color": "blue", "underline": 1, "align": "center"})
@@ -698,7 +679,6 @@ if run:
                     else:
                         ws_opp.write(r, col_idx, "-")
 
-            # Autoajustes
             ws_opp.set_column("A:A", 55, fmt_text)
             ws_opp.set_column("B:B", 10, fmt_int)
             ws_opp.set_column("C:C", 12, fmt_text)
@@ -708,7 +688,7 @@ if run:
             ws_opp.set_column("G:G", 18, fmt_money)
             ws_opp.set_column("H:H", 16, fmt_pct)
 
-            # Chart
+            # Datos para gráfico (mínimo vs promedio por grupo)
             label_base = export_df_opp["title_group"] if "title_group" in export_df_opp.columns else export_df_opp["title"]
             chart_df = pd.DataFrame({
                 "label": label_base.astype(str) + " (" + export_df_opp["year"].astype("Int64").astype(str) + ")",
@@ -727,16 +707,12 @@ if run:
 
             chart = wb.add_chart({"type": "column"})
             last_row = len(chart_df) + 1
-            chart.add_series({
-                "name": "Precio oportunidad (mín)",
-                "categories": ["ChartData", 1, 0, last_row - 1, 0],
-                "values":     ["ChartData", 1, 1, last_row - 1, 1],
-            })
-            chart.add_series({
-                "name": "Promedio del grupo",
-                "categories": ["ChartData", 1, 0, last_row - 1, 0],
-                "values":     ["ChartData", 1, 2, last_row - 1, 2],
-            })
+            chart.add_series({"name": "Precio oportunidad (mín)",
+                              "categories": ["ChartData", 1, 0, last_row - 1, 0],
+                              "values": ["ChartData", 1, 1, last_row - 1, 1]})
+            chart.add_series({"name": "Promedio del grupo",
+                              "categories": ["ChartData", 1, 0, last_row - 1, 0],
+                              "values": ["ChartData", 1, 2, last_row - 1, 2]})
             chart.set_title({"name": "Precio vs Promedio por grupo (título + año)"})
             chart.set_x_axis({"name": "Grupo"})
             chart.set_y_axis({"name": "Precio ARS"})
@@ -745,7 +721,7 @@ if run:
             ws_g = wb.add_worksheet("Gráfico")
             ws_g.insert_chart("A1", chart, {"x_scale": 2.0, "y_scale": 1.7})
 
-        # Resumen / metadatos
+        # Resumen
         meta_rows = [
             ("plan", "premium" if premium else "free"),
             ("years_queried", ", ".join(map(str, years_to_query))),
@@ -763,5 +739,6 @@ if run:
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         )
 
-# Footer
-st.markdown("---\n**Freemium**: esta demo limita páginas y búsquedas por sesión. Para desbloquear todo, ingresá tu código premium en la barra lateral.")
+st.markdown(
+    "---\n**Freemium**: esta demo limita páginas y búsquedas por sesión. Para desbloquear todo, ingresá tu código premium en la barra lateral."
+)
