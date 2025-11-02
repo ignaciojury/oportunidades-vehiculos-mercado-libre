@@ -383,8 +383,11 @@ def _write_df_with_links(writer: pd.ExcelWriter, df: pd.DataFrame, sheet_name: s
 # ─────────────────────────────────────────
 # Acción principal
 # ─────────────────────────────────────────
+# ─────────────────────────────────────────
+# Acción
+# ─────────────────────────────────────────
 if run:
-    # Límite Freemium por cookie (1 búsqueda/30d por navegador, configurable)
+    # --- Límite Freemium por cookie (1 búsqueda por 30 días, configurable) ---
     if not premium:
         already = int(quota.get("count", 0))
         if already >= FREE_LIMIT_SEARCHES:
@@ -392,98 +395,101 @@ if run:
                 f"Límite de {FREE_LIMIT_SEARCHES} búsqueda(s) alcanzado en este navegador. "
                 "Ingresá un código premium para continuar."
             )
-            st.stop()
-        inc_search_count()
+        else:
+            # cuenta esta búsqueda (persistente en cookie cifrada)
+            inc_search_count()
 
-    # Años a consultar
-    years_to_query = list(range(year_min, year_max + 1))
+    # --- Aseguramos que no seguimos si se alcanzó el límite ---
+    if not premium and int(quota.get("count", 0)) > FREE_LIMIT_SEARCHES:
+        st.stop()
+
+    # --- DEFINIR years_to_query ANTES DEL BUCLE ---
+    years_to_query = list(range(int(year_min), int(year_max) + 1))
     st.info(f"Estrategia: búsqueda por año individual → {years_to_query}")
 
     rows_all: list[dict] = []
     logs_all: list[dict] = []
-    total_by_year: list[dict] = []
-    seen_links_all: set[str] = set()  # DEDUPE GLOBAL POR AVISO
+    total_by_year = []
+    seen_links_all = set()  # DEDUPE GLOBAL POR AVISO
 
-    # Loop por años
     # ─────────────────────────────────────────
-# 1) Scraping por cada año del rango
-# ─────────────────────────────────────────
-
-for y in years_to_query:
-    base_url_y = build_base_url(
-        dueno_directo=only_private,
-        year_min=y,
-        year_max=y,  # consulta "por año"
-        price_min_ars=price_min,
-        price_max_ars=price_max,
-        km_min=km_min,
-        km_max=km_max,
-        transmissions=transmissions,
-    )
-
-    # Canonicalizamos ANTES de paginar
-    seed = canonicalize_ml_url(base_url_y, proxy.strip() or None)
-    if isinstance(seed, tuple):
-        seed_url, seed_meta = seed
-    else:
-        seed_url, seed_meta = seed, {}
-
-    st.markdown(f"• Año {y}: <{seed_url}>")
-
-    # ── Verificación manual de captcha si corresponde ──
-    is_verif = bool(seed_meta.get("verification")) or ("account-verification" in seed_url)
-    if is_verif:
-        st.warning(
-            "⚠️ Mercado Libre solicitó verificación/captcha.\n"
-            "Abrí el enlace de arriba en tu navegador, resolvelo, copiá la URL final "
-            "y pegala abajo para continuar."
+    # 1) Scraping por cada año del rango
+    # ─────────────────────────────────────────
+    for y in years_to_query:
+        base_url_y = build_base_url(
+            dueno_directo=only_private,
+            year_min=y,
+            year_max=y,  # consulta "por año"
+            price_min_ars=price_min,
+            price_max_ars=price_max,
+            km_min=km_min,
+            km_max=km_max,
+            transmissions=transmissions,
         )
-        st.code(seed_url)
-        manual_url = st.text_input(
-            f"Pegá aquí la URL verificada después del captcha (año {y}):",
-            "",
-            key=f"manual_url_{y}",
-            help="Debe empezar con https://autos.mercadolibre.com.ar/…"
-        )
-        if manual_url.strip():
-            seed_url = manual_url.strip()
-            st.success("✅ Usando la URL verificada manualmente.")
+
+        # Canonicalizamos ANTES de paginar
+        seed = canonicalize_ml_url(base_url_y, proxy.strip() or None)
+        if isinstance(seed, tuple):
+            seed_url, seed_meta = seed
         else:
-            st.stop()  # detenemos el run hasta que pegues la URL verificada
+            seed_url, seed_meta = seed, {}
 
-    # ── Scraping del año ya con URL válida ──
-    with st.spinner(f"Scrapeando año {y}…"):
-        rows_y, logs_y = scrape_list(
-            base_url=seed_url,
-            max_items=per_year_max_items,
-            max_pages=PAGES_PER_YEAR,
-            proxy_url=proxy.strip() or None,
-            delay_s=delay,
-        )
+        st.markdown(f"• Año {y}: <{seed_url}>")
 
-    # Logs con metadatos
-    for lg in logs_y or []:
-        d = _log_to_dict(lg)
-        d["year_query"] = y
-        d["base_url_seed"] = seed_url
-        d["base_url_orig"] = base_url_y
-        logs_all.append(d)
+        # ── Verificación manual de captcha si corresponde ──
+        is_verif = bool(seed_meta.get("verification")) or ("account-verification" in seed_url)
+        if is_verif:
+            st.warning(
+                "⚠️ Mercado Libre solicitó verificación/captcha.\n"
+                "Abrí el enlace de arriba en tu navegador, resolvelo, copiá la URL final "
+                "y pegala abajo para continuar."
+            )
+            st.code(seed_url)
+            manual_url = st.text_input(
+                f"Pegá aquí la URL verificada después del captcha (año {y}):",
+                "",
+                key=f"manual_url_{y}",
+                help="Debe empezar con https://autos.mercadolibre.com.ar/…"
+            )
+            if manual_url.strip():
+                seed_url = manual_url.strip()
+                st.success("✅ Usando la URL verificada manualmente.")
+            else:
+                st.stop()  # detenemos el run hasta que pegues la URL verificada
 
-    # Consolidación con de-dupe global por permalink canónico
-    added = 0
-    for r in (rows_y or []):
-        r = dict(r)
-        k = _canonical_link(r.get("permalink", ""))
-        if not k or k in seen_links_all:
-            continue
-        seen_links_all.add(k)
-        r["_permalink_key"] = k
-        if r.get("year") in [None, "", 0]:
-            r["year"] = y
-        rows_all.append(r)
-        added += 1
+        # ── Scraping del año ya con URL válida ──
+        with st.spinner(f"Scrapeando año {y}…"):
+            rows_y, logs_y = scrape_list(
+                base_url=seed_url,
+                max_items=per_year_max_items,
+                max_pages=PAGES_PER_YEAR,
+                proxy_url=proxy.strip() or None,
+                delay_s=delay,
+            )
 
-    total_by_year.append({"year": y, "items": added})
+        # Logs con metadatos
+        for lg in (logs_y or []):
+            d = _log_to_dict(lg)
+            d["year_query"] = y
+            d["base_url_seed"] = seed_url
+            d["base_url_orig"] = base_url_y
+            logs_all.append(d)
+
+        # Consolidación con de-dupe global por permalink canónico
+        added = 0
+        for r in (rows_y or []):
+            r = dict(r)
+            k = _canonical_link(r.get("permalink", ""))
+            if not k or k in seen_links_all:
+                continue
+            seen_links_all.add(k)
+            r["_permalink_key"] = k
+            if r.get("year") in [None, "", 0]:
+                r["year"] = y
+            rows_all.append(r)
+            added += 1
+
+        total_by_year.append({"year": y, "items": added})
 
     # Resumen por año y logs
     df_years = pd.DataFrame(total_by_year)
