@@ -431,9 +431,7 @@ if run:
         seed_url, seed_meta = canonicalize_ml_url(base_url_y, proxy.strip() or None)
         st.markdown(f"• Año {y}: <{seed_url}>")
 
-        # Si Mercado Libre pide verificación/captcha, permitir resolver manualmente
-        is_verif = bool(seed_meta.get("verification")) or ("account-verification" in seed_url)
-        if is_verif:
+        if seed_meta.get("verification", False):
             st.warning(
                 "⚠️ Mercado Libre solicitó verificación/captcha.\n"
                 "Abrí el enlace de arriba en tu navegador, resolvelo, copiá la URL final "
