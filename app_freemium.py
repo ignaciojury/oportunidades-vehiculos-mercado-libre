@@ -74,7 +74,7 @@ def inc_search_count():
 st.set_page_config(page_title="Oportunidades ML (Scraping)", page_icon="🚗", layout="wide")
 st.title("🚗 Oportunidades en Autos & Camionetas — Scraping (sin API)")
 st.caption(
-    "Freemium con cookies: 1 búsqueda gratis por navegador cada 30 días. Ingresa un código Premium para desbloquear límites."
+    "Tenés 1 búsqueda gratis cada 30 días. Ingresa un código Premium para desbloquear límites."
 )
 
 # ─────────────────────────────────────────
@@ -240,7 +240,7 @@ with st.sidebar:
         st.success("✅ Premium activado")
     else:
         st.info(
-            f"Plan Free: hasta {FREE_LIMIT_SEARCHES} búsqueda(s) por navegador/30d, "
+            f"Plan Free: hasta {FREE_LIMIT_SEARCHES} búsqueda cada 30d, "
             f"{FREE_PAGES_PER_YEAR} páginas/año, {FREE_ITEMS_PER_PAGE} avisos/página."
         )
 
