@@ -205,3 +205,26 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+# Streamlit secrets (no subir claves)
+.streamlit/secrets.toml
+
+# Salidas/exports
+*.xlsx
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.env
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Streamlit
+.streamlit/secrets.toml
+
+# Notebooks/outputs (si usás)
+.ipynb_checkpoints/
+*.xlsx
