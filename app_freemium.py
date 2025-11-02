@@ -430,18 +430,21 @@ if run:
                        "Probá con un proxy residencial o bajá el ritmo (delay).")
 
         # Scrape con defensas
+        import random
+
         with st.spinner(f"Scrapeando año {y}…"):
-            try:
-                rows_y, logs_y = scrape_list(
-                    base_url=seed_url,
-                    max_items=per_year_max_items,
-                    max_pages=PAGES_PER_YEAR,
-                    proxy_url=proxy.strip() or None,
-                    delay_s=delay,
-                )
-            except Exception as e:
-                st.error(f"Error al scrapear {y}: {e}")
-                rows_y, logs_y = [], []
+    try:
+        jitter = random.uniform(-0.25, 0.25)  # ±250ms
+        rows_y, logs_y = scrape_list(
+            base_url=seed_url,
+            max_items=per_year_max_items,
+            max_pages=PAGES_PER_YEAR,
+            proxy_url=proxy.strip() or None,
+            delay_s=max(0.2, delay + jitter),  # no menos de 0.2s
+        )
+    except Exception as e:
+        st.error(f"Error al scrapear {y}: {e}")
+        rows_y, logs_y = [], []
 
         # Logs (incluye meta del seed)
         for lg in (logs_y or []):
