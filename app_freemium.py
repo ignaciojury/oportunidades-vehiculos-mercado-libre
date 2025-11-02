@@ -114,19 +114,36 @@ def normalize_price_ars(price, currency, usd_ars, misprice_ars_threshold=200_000
     return p, p / usd_ars, cur
 
 
-def canonicalize_ml_url(u: str, proxy_url: str | None = None, timeout: int = 20) -> str:
-    """Pide la primera página, deja que ML redireccione y devuelve la URL canónica.
-    También limpia cualquier sufijo '/_Desde_###' para que el paginado funcione bien."""
+def canonicalize_ml_url(u: str, proxy_url: str | None = None, timeout: int = 20) -> tuple[str, dict]:
+    """
+    Devuelve (url_canonica, meta).
+    Si ML devuelve verificación/captcha, NO usamos esa URL y marcamos meta['verification']=True
+    """
+    meta = {"verification": False, "status": None, "final_url": None}
     try:
-        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AutoCotizador/1.0"}
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                          "(KHTML, like Gecko) Chrome/124.0 Safari/537.36",
+            "Accept-Language": "es-AR,es;q=0.9,en;q=0.8",
+            "Referer": "https://autos.mercadolibre.com.ar/",
+        }
         proxies = {"http": proxy_url, "https": proxy_url} if proxy_url else None
         r = requests.get(u, headers=headers, proxies=proxies, timeout=timeout, allow_redirects=True)
-        r.raise_for_status()
+        meta["status"] = r.status_code
+        meta["final_url"] = r.url
+
+        # Si nos mandan a verificación, no usamos esa URL “canónica”
+        if "account-verification" in r.url or "/gz/" in r.url and "verification" in r.url:
+            meta["verification"] = True
+            # devolvemos la URL original para que scrape_list la intente igual (o lo registremos)
+            return u, meta
+
         canon = r.url
         canon = re.sub(r"/_Desde_\d+/?$", "", canon, flags=re.IGNORECASE)
-        return canon
-    except Exception:
-        return u
+        return canon, meta
+    except Exception as e:
+        meta["status"] = f"error: {e}"
+        return u, meta
 
 
 def _canonical_link(u: str) -> str:
@@ -405,8 +422,10 @@ if run:
             transmissions=transmissions,
         )
 
-        seed_url = canonicalize_ml_url(base_url_y, proxy.strip() or None)
-        st.markdown(f"• Año {y}: <{seed_url}>")
+ seed_url, seed_meta = canonicalize_ml_url(base_url_y, proxy.strip() or None)
+st.markdown(f"• Año {y}: <{seed_url}>")
+if seed_meta.get("verification"):
+    st.warning("⚠️ Mercado Libre solicitó verificación/captcha para esta búsqueda. Probá con proxy residencial o bajá el ritmo.")
 
         with st.spinner(f"Scrapeando año {y}…"):
             rows_y, logs_y = scrape_list(
