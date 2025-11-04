@@ -9,7 +9,12 @@ from urllib.parse import urlsplit, urlunsplit
 import pandas as pd
 import streamlit as st
 
-#from utils.scraper import build_base_url, scrape_list, canonicalize_ml_url  # reuses your utils module
+try:
+    from utils.scraper import build_base_url, scrape_list, canonicalize_ml_url
+except Exception as _e:
+    import streamlit as st
+    st.error('No pude importar utils.scraper (¿circular import?). Abrí utils/scraper.py y eliminá cualquier `from utils.scraper import ...` dentro de ese archivo. También asegurate de tener utils/__init__.py.')
+    raise
 import numpy as np
 
 
