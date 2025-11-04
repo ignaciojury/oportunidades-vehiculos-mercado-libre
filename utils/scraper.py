@@ -9,7 +9,7 @@ from urllib.parse import urlsplit, urlunsplit
 import pandas as pd
 import streamlit as st
 
-from utils.scraper import build_base_url, scrape_list, canonicalize_ml_url  # reuses your utils module
+#from utils.scraper import build_base_url, scrape_list, canonicalize_ml_url  # reuses your utils module
 import numpy as np
 
 
