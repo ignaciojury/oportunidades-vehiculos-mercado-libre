@@ -6,7 +6,6 @@ __pycache__/
 *.egg-info/
 .venv/
 venv/
-.env
 
 # OS
 .DS_Store
@@ -28,4 +27,5 @@ Thumbs.db
 
 # Editors/IDE
 .idea/
-.vscode/
+config.bat
+node_modules
