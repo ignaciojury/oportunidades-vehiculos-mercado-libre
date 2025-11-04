@@ -254,7 +254,7 @@ def canonicalize_ml_url(u: str, proxy_url: str | None = None, timeout: int = 20)
 # Config de página
 # ─────────────────────────────────────────
 st.set_page_config(page_title="Oportunidades ML (Scraping)", page_icon="🚗", layout="wide")
-st.title("🚗 Oportunidades en Autos & Camionetas — Scraping (sin API)")
+st.title("🚗 Oportunidades en Autos & Camionetas")
 st.caption("Freemium: agrupa por TÍTULO + AÑO, calcula promedio ARS y detecta oportunidades vs. mercado.")
 
 
